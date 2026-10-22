@@ -1,0 +1,3 @@
+# k6 결과 파일
+result-*.json
+*.log
