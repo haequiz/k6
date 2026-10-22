@@ -135,6 +135,8 @@ k6 run -e PIN=$PIN -e PLAYERS=500 -e JOIN_SEC=60 quiz-load.js
 | `hq_answered` · `hq_answer_ms` | 답 제출 수 · 답 응답 시간 | p95 < 0.5초 |
 | `hq_questions_received` · `hq_results_received` · `hq_ended_received` | 문제 · 결과 · 최종 결과를 받은 횟수 | |
 | `hq_fail` | 실패 수 (응답 실패 · STOMP 오류 · 연결 오류) | 0 |
+| `hq_late_answers` | 진행자가 먼저 마감해서 늦게 도착한 답. 실패로 치지 않습니다. 마감을 6초보다 일찍 누르면 생깁니다 | |
+| `hq_video_order` | 영상 시작 신호보다 문제가 먼저 도착해 잠긴 문제에 답한 횟수 (서버 메시지 순서 문제, `hq_fail`에도 포함) | 0 |
 | **문항별 도착** (맨 아래) | 문제마다 받은 인원과 첫 도착부터 마지막 도착까지 걸린 시간. 서버가 전원에게 보내는 데 걸린 시간입니다 | |
 
 기준을 넘은 항목은 ✗로 표시되고, k6가 오류 코드(99)로 끝납니다.

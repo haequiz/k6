@@ -32,9 +32,13 @@ const cQuestions = new Counter('hq_questions_received');
 const cResults = new Counter('hq_results_received');
 const cEnded = new Counter('hq_ended_received');
 const cFail = new Counter('hq_fail');                // 응답 실패 · STOMP ERROR · 연결 오류
-// 문제 · 결과가 도착한 시각(이 PC 시계). 끝나고 '첫 도착 ~ 마지막 도착' 차이로 다 받기까지 걸린 시간을 본다
+const cLate = new Counter('hq_late_answers');        // 진행자가 먼저 마감해서 늦게 낸 답 (실패 아님)
+const cVideoOrder = new Counter('hq_video_order');   // 영상 신호보다 문제가 먼저 와서 잠긴 문제에 답함 (서버 순서 문제)
+// 문제 · 결과가 도착한 시각(이 PC 시계)과 받은 인원. 끝나고 '첫 도착 ~ 마지막 도착' 차이로 다 받기까지 걸린 시간을 본다
 const qArrival = Array.from({ length: MAX_Q }, (_, i) => new Trend(`hq_arrival_q${i + 1}`));
 const rArrival = Array.from({ length: MAX_Q }, (_, i) => new Trend(`hq_arrival_r${i + 1}`));
+const qCount = Array.from({ length: MAX_Q }, (_, i) => new Counter(`hq_count_q${i + 1}`));
+const rCount = Array.from({ length: MAX_Q }, (_, i) => new Counter(`hq_count_r${i + 1}`));
 
 export const options = {
   scenarios: {
@@ -166,7 +170,20 @@ export default function () {
           c2.request('player.answer', { value }).then(r => {
             tAnswer.add(r.ms);
             cAnswered.add(1);
-          }).catch(e => { cFail.add(1); console.error(`답 실패 ${who.name} ${q.index + 1}번: ${e.message}`); });
+          }).catch(e => {
+            if (e.message.includes('지금은 답을 낼 수 없습니다')) {
+              cLate.add(1);   // 이미 마감됨 — 실제 태블릿에서도 같은 안내가 뜬다
+            } else if (e.message.includes('영상을 본 뒤에')) {
+              cVideoOrder.add(1);
+              cFail.add(1);
+              console.error(`영상 순서 ${who.name} ${q.index + 1}번: 영상 신호보다 문제가 먼저 도착`);
+              answered = -1;   // 태블릿처럼 영상이 끝나면 다시 답한다
+              waiting = q;
+            } else {
+              cFail.add(1);
+              console.error(`답 실패 ${who.name} ${q.index + 1}번: ${e.message}`);
+            }
+          });
         }, think);
       };
       const onQuestion = q => {
@@ -175,7 +192,7 @@ export default function () {
       };
 
       c2.on('game.question', q => {
-        if (q.index < MAX_Q) qArrival[q.index].add(Date.now());
+        if (q.index < MAX_Q) { qArrival[q.index].add(Date.now()); qCount[q.index].add(1); }
         cQuestions.add(1);
         onQuestion(q);
       });
@@ -184,7 +201,7 @@ export default function () {
         if (!watching && waiting) { const q = waiting; waiting = null; answer(q); }
       });
       c2.on('game.result', r => {
-        if (r.index < MAX_Q) rArrival[r.index].add(Date.now());
+        if (r.index < MAX_Q) { rArrival[r.index].add(Date.now()); rCount[r.index].add(1); }
         cResults.add(1);
       });
       c2.on('game.ended', () => { cEnded.add(1); setTimeout(() => c2.close(), 15_000); });
@@ -212,15 +229,15 @@ export default function () {
 export function handleSummary(data) {
   // 문항별로 '첫 참여자 도착 ~ 마지막 참여자 도착' = 서버가 전원에게 보내는 데 걸린 시간
   const rows = [];
+  const cell = (t, c) => (t ? `${c ? c.values.count : 0}명 · ${Math.round(t.values.max - t.values.min)}ms` : '-');
   for (let i = 0; i < MAX_Q; i++) {
-    const q = data.metrics[`hq_arrival_q${i + 1}`];
-    const r = data.metrics[`hq_arrival_r${i + 1}`];
+    const n = i + 1;
+    const q = data.metrics[`hq_arrival_q${n}`];
+    const r = data.metrics[`hq_arrival_r${n}`];
     if (q || r) {
-      rows.push(`  ${String(i + 1).padStart(2)}번   문제 ${q ? `${q.values.count}명 · ${Math.round(q.values.max - q.values.min)}ms` : '-'}`
-        + `   결과 ${r ? `${r.values.count}명 · ${Math.round(r.values.max - r.values.min)}ms` : '-'}`);
+      rows.push(`  ${String(n).padStart(2)}번   문제 ${cell(q, data.metrics[`hq_count_q${n}`])}   결과 ${cell(r, data.metrics[`hq_count_r${n}`])}`);
     }
-    delete data.metrics[`hq_arrival_q${i + 1}`];
-    delete data.metrics[`hq_arrival_r${i + 1}`];
+    for (const k of [`hq_arrival_q${n}`, `hq_arrival_r${n}`, `hq_count_q${n}`, `hq_count_r${n}`]) delete data.metrics[k];
   }
   const head = `\n문항별 도착 (받은 인원 · 첫 도착부터 마지막 도착까지)\n${rows.join('\n') || '  (진행된 문항 없음)'}\n`;
   return {
