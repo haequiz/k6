@@ -98,7 +98,7 @@ function connect(subs, onReady, onClose) {
   let seq = 0;
   let openedAt = 0;
   let hb = null;
-  const send = f => sock.send(JSON.stringify([f]));
+  const send = f => { if (sock.readyState === 1) sock.send(JSON.stringify([f])); };   // 1 = OPEN. 닫히는 중에 보내면 오류
   const api = {
     on(type, fn) { handlers[type] = fn; },
     request(type, body = {}) {
@@ -108,7 +108,7 @@ function connect(subs, onReady, onClose) {
         send(stompFrame('SEND', { destination: `/app/${type}`, 'request-id': id, 'content-type': 'application/json' }, JSON.stringify(body)));
       });
     },
-    close() { sock.close(); },
+    close() { if (hb) clearInterval(hb); hb = null; sock.close(); },
   };
   sock.onopen = () => { openedAt = Date.now(); };
   sock.onmessage = e => {
